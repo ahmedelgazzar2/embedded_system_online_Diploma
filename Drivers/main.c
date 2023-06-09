@@ -15,7 +15,16 @@
  *                        opensource.org/licenses/BSD-3-Clause
  *
  ******************************************************************************/
+
 #include"stm32f103c6_gpio_driver.h"
+#include"stm32f103c6_USART_driver.h"
+#include"stm32f103c6_SPI_driver.h"
+
+
+//#define MCU_Act_As_Slave
+#define MCU_Act_As_Master
+
+uint32_t charcter;
 
 void clock_init()
 {
@@ -23,59 +32,69 @@ void clock_init()
 	GPIOA_CLK_EN();
 	//Enable GPIOB clock
 	GPIOB_CLK_EN();
+	//Enable Alternative Pins.
+	AFIO_CLK_EN();
 }
 
-void GPIO_init()
+void UART_Call_Back()
 {
-	Pin_config_t pin_cfg;
-	//set pin A1 floating input ..CNF 01: Floating input (reset state)
-	pin_cfg.GPIO_PinNumber = GPIO_PIN1;
-	pin_cfg.GPIO_MODE = GPIO_MODE_INPUT_FLOAT;
-	MCAL_GPIO_INIT(GPIOA,&pin_cfg);
-
-	//set pin A13 floating input ..CNF 01: Floating input (reset state)
-	pin_cfg.GPIO_PinNumber = GPIO_PIN13;
-	pin_cfg.GPIO_MODE = GPIO_MODE_INPUT_FLOAT;
-	MCAL_GPIO_INIT(GPIOA,&pin_cfg);
-
-	//set pin B1  (push-pull) output...... MODE 01: Output mode, max speed 10 MHz.
-	pin_cfg.GPIO_PinNumber = GPIO_PIN1;
-	pin_cfg.GPIO_MODE = GPIO_MODE_OUTPUT_PP;
-	pin_cfg.GPIO_OUTPUT_speed = GPIO_SPEED_10M;
-	MCAL_GPIO_INIT(GPIOB,&pin_cfg);
-
-	//set pin B13  (push-pull) output...... MODE 01: Output mode, max speed 10 MHz.
-	pin_cfg.GPIO_PinNumber = GPIO_PIN13;
-	pin_cfg.GPIO_MODE = GPIO_MODE_OUTPUT_PP;
-	pin_cfg.GPIO_OUTPUT_speed = GPIO_SPEED_10M;
-	MCAL_GPIO_INIT(GPIOB,&pin_cfg);
-}
-
-void wait_ms(int x){
-	int i,j;
-	for(i=0;i<x;i++)
-		for(j=0;j<255;j++);
+#ifdef MCU_Act_As_Master
+	MCAL_UART_Recieve_data(UART1, &charcter, pollingDis);
+	MCAL_UART_send_data(UART1, &charcter, pollingEn);
+	MCAL_GPIO_WritePin(GPIOA, GPIO_PIN4, GPIO_PIN_RESET);
+	MCAL_SPI_TX_RX(SPI1,(uint16_t *)charcter, pollingEn);
+	MCAL_GPIO_WritePin(GPIOA, GPIO_PIN4, GPIO_PIN_SET);
+#endif
 }
 
 int main(void)
 {
 	clock_init();
-	GPIO_init();
-	while(1)
-	{
-		//PB PUR by default 1 if press it will be 0....(single press)
-		if((MCAL_GPIO_ReadPin(GPIOA,GPIO_PIN1)) == 0 )
-		{
-			MCAL_GPIO_TogglePin(GPIOB, GPIO_PIN1);
-			while((MCAL_GPIO_ReadPin(GPIOA,GPIO_PIN1)) == 0 );//while pressing..single press.
-		}
-		//PB PDR by default 0 if press it will be 1....(multi pressing)
-		if((MCAL_GPIO_ReadPin(GPIOA,GPIO_PIN13)) == 1 )
-		{
-			MCAL_GPIO_TogglePin(GPIOB, GPIO_PIN13);
-		}
-		wait_ms(1);
+
+	UART_config UART1cfg;
+
+	UART1cfg.BaudRate = UART_BaudRate_115200;
+	UART1cfg.HWFlowcontrol = UART_HWFlowcontrol_NONE;
+	UART1cfg.IRQ_Enable = UART_IRQ_Enable_RXNEIE;
+	UART1cfg.P_IRQ_Callback = UART_Call_Back;
+	UART1cfg.parity = UART_parity_NONE;
+	UART1cfg.Payload_Lentgh = UART_PayloadLentgh_8bit;
+	UART1cfg.StopBit = UART_StopBit_1;
+	UART1cfg.UART_Mode = UART_Mode_TX_RX;
+	MCAL_UART_init(UART1, &UART1cfg);
+	MCAL_UART_set_GPIO_pin(UART1);
+
+	SPI_config_t spicfg;
+	spicfg.CLK_Phase = SPI_CLK_PHASE_1EDGE_FRIST_DATA_SAMPLING;
+	spicfg.CLK_Polarity = SPI_CLK_POLARITY_HIGH_WHEN_IDLE;
+	spicfg.DataSize = SPI_DATA_SIZE_8BIT;
+	spicfg.communication_Mode = SPI_UNIDRICTIONAL_2LINES;
+	spicfg.Frame_format = SPI_MSB_TRANSMIT_FRIST;
+	spicfg.BaudRate_Prescaler = SPI_BAUDRATE_PRE_8;
+
+#ifdef MCU_Act_As_Master
+	spicfg.Device_Mode = SPI_DEVICE_MODE_MASTER;
+	spicfg.IRQ_Enable = SPI_IRQ_Enable_NONE;
+	spicfg.NSS = NSS_SW_SET;
+	spicfg.IRQ_CallBack = NULL;
+
+	/* Configuration of SS */
+	Pin_config_t SS_Config;
+
+	/* Configure SS at PA4 by GPIO */
+	SS_Config.GPIO_PinNumber = GPIO_PIN4;
+	SS_Config.GPIO_MODE = GPIO_MODE_OUTPUT_PP;
+	SS_Config.GPIO_OUTPUT_speed = GPIO_SPEED_10M;
+
+	MCAL_GPIO_INIT(GPIOA, &SS_Config);
+#endif
+
+	MCAL_SPI_INIT(SPI1, &spicfg);
+	MCAL_SPI_GPIO_SetPins(SPI1);
+
+	MCAL_GPIO_WritePin(GPIOA, GPIO_PIN4, GPIO_PIN_SET);
+	while(1){
+
 	}
+	return 0;
 }
-
-
